@@ -1,0 +1,134 @@
+---
+title: "MED4 dynamic flux balance model with AMGs"
+format: html
+---
+
+
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import sys
+import warnings
+warnings.filterwarnings('ignore')
+import re
+from pathlib import Path
+import scipy as sp
+import cobra
+
+from cobra.io import read_sbml_model, write_sbml_model, validate_sbml_model
+```
+
+## Import the models and medium conditions, define light and light absorption parameters and initialize the COMETS layout
+
+The first step is to load the Prochlorococcus model iSO595.
+```{python}
+ori_model_file = './Model_files/iSO595v7.xml'
+v1_model_file = './Model_files/ProchlorococcusMED4v1.xml' 
+model = read_sbml_model(ori_model_file)
+model.name = 'Prochlorococcus MED4'
+# print(len(model.reactions))
+# print(len(model.metabolites))
+# print(len(model.genes))
+model.id = 'ProchlorococcusMED4'
+write_sbml_model(model, v1_model_file)
+model
+```
+
+```{python}
+model.summary()
+```
+
+```{python}
+model.solver
+```
+
+## Modelling the diurnal cycle
+
+COMETS can simulate periodically changing environments, where the periodic function can be either a step function, a sine function or a half sine function. The most obvious use case for this functionality is to study how the metabolism of photosynthetic organisms change during the day / night cycle with varying sunlight (photons) and how this affects the microbes. Here we simulate one such experiment with a genome-scale model of Prochlorococcus, the most abundant marine photoautotroph.
+
+However, the COMETS are dependent on GUROBI which is not free to use. Therefore, we will use the cobrapy package to run the COMETS model. cobrapy is a python package that allows the user to run cobra models without the need for a GUROBI license. 
+
+```{python}
+# import cometspy as c
+# # Use the above model to create a COMETS model
+# test_model = c.model(model)
+# # Change comets specific parameters, e.g. the initial biomass of the model
+# # Notre 
+# test_model.initial_pop = [0, 0, 1e-7] 
+# # Create a parameters object with default values 
+# my_params = c.params()
+# # Change the value of a parameter, for example number of simulation cycles
+# my_params.set_param('maxCycles', 100)
+# # Set some writeTotalBiomassLog parameter to True, in order to save the output
+# my_params.set_param('writeTotalBiomassLog', True)
+# # See avaliable parameters and their values
+# my_params.show_params()
+```
+
+
+We now define the parameters related to light absorption and use these to calculate a model-specific absorption coefficient. We assume a monochromatic light source at 680 nm, but it is possible to extend these calculations to a light source with a spectral distribution. All parameters are acquired from the literature(refs 52, 53, 54, 55, 56, 57).
+
+```{python}
+model.initial_pop = [1, 1, 1e-7]
+model.obj_style = 'MAX_OBJECTIVE_MIN_TOTAL'
+```
+
+```{python}
+# The ratio of chlorophyll is extracted from the model biomass-function
+ci_dvchla = 0.016                 # gr/gDW (Partensky 1993 / Casey 2016)
+ci_dvchlb = 0.0013                # gr/gDW (Partensky 1993 / Casey 2016)
+absorption_dvchla_680 = 0.0184    # m^2 mg^-1 (Bricaud et al., 2004)
+absorption_dvchlb_680 = 0.0018    # m^2 mg^-1 (Bricaud et al., 2004)
+absorption_water_680 = 0.465      # m^-1 (Pope and Fry, 1997)
+wavelength = 680                  # nm
+```
+
+Calculate the packaging effect. This is taking into account that the light-absorbing pigments are not dissolved in the media, but contained within discrete cells 58. The packaging effect approaches 0 asymptotically for large cells. Depending on the accuracy needed in the calculation the packaging effect can be assumed to be close to 1 for very small cells, such as Prochlorococcus 58.
+
+```{python}
+diameter = 0.6                    # um (Morel et al., 1993)
+n_dash = 13.77*1e-3               # imaginary part of refractive index at 675 nm (Stramski et al. 2001)
+size_parameter_alpha = diameter*1e3*math.pi/wavelength    # The ratio between the cell size and wavelength
+rho_dash = 4*size_parameter_alpha*n_dash
+Q_a = 1+(2*math.exp(-rho_dash)/rho_dash)+2*(math.exp(-rho_dash)-1)/rho_dash**2
+packaging_effect = 1.5*Q_a/rho_dash
+
+# Calculate the Prochlorococcus specific biomass absorption coefficient in units m2/ g DW biomass
+absorption_biomass = packaging_effect*(ci_dvchla*1e3*absorption_dvchla_680+ci_dvchlb*1e3*absorption_dvchlb_680)
+```
+
+Set the calculated absorption rate as a model parameter for the exchange reaction of light. LightEX is the exchange reaction for photons in the model.
+
+```{python}
+model.add_light('LightEX', absorption_biomass, absorption_water_680)
+```
+
+Now create the layout and define concentration of metabolites in the growth medium. We here set the concentration of all essential metabolites except photons to 1000 mmol and activate the `static` flag, because we want the growth to be only limited by the light conditions
+
+```{python}
+# Make layout with the COMETS toolbox
+med4 = model;
+
+# Define medium
+metabs = ['Ammonia[e]', 'HCO3[e]', 'CO2[e]', 'H[e]', 'Orthophosphate[e]', 'H2O[e]', 'Cadmium[e]', 
+          'Calcium_cation[e]', 'Chloride_ion[e]', 'Cobalt_ion[e]', 'Copper[e]', 'Fe2[e]', 
+          'Magnesium_cation[e]', 'Molybdenum[e]', 'K[e]','Selenate[e]', 'Sodium_cation[e]', 
+          'Strontium_cation[e]', 'Sulfate[e]', 'Zn2[e]', 'Hydrogen_sulfide[e]']
+
+for i in metabs:
+    layout.set_specific_metabolite(i, 1000)
+    layout.set_specific_static(i, 1000)
+```
+
+
+### Define light conditions. 
+Light is modelled as individual photons the value is the number of photons (in mmol) absorbed by the organism at each timepoint. While it is treated like any other metabolite, it is more reasonable to consider it light intensity than a concentration which the other compounds in the media are. To model natural light conditions we use the periodic function called half sin which is equal to $max(f(t), 0) $ where:
+
+$$
+f(t) = A\sin(\omega t+\phi)+C
+$$
+
+Here A is the amplitude, $\omega$ is the angular frequency ($\omega=2\pi/T$), T the period, $\phi$ the phase and C the offset. Other periodic functions are available: step function, sine and cosine. In this example we define global light conditions. We here define the period to 24 hours with an amplitude of 0.04 mmol photons per meter squared per second.

@@ -1,0 +1,219 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import sys
+import warnings
+warnings.filterwarnings('ignore')
+import re
+from pathlib import Path
+import scipy as sp
+import cobra
+
+from cobra.io import read_sbml_model, write_sbml_model, validate_sbml_model
+```
+
+```{python}
+model_file = './Model_files/iSO595v7.xml'
+model = read_sbml_model(model_file)
+# print(len(model.reactions))
+# print(len(model.metabolites))
+# print(len(model.genes))
+model
+```
+
+```{python}
+[metabolite.id for metabolite in list(model.metabolites) if "phosphate" in metabolite.id.lower()]
+```
+
+```{python}
+[metabolite.id for metabolite in list(model.metabolites) if "hydrogen" in metabolite.id.lower()]
+```
+
+```{python}
+[reaction.id for reaction in list(model.reactions) if "biomass" in reaction.id.lower()]
+```
+
+```{python}
+model.reactions.get_by_id("BIOMASS").summary()
+```
+
+```{python}
+model.reactions.get_by_id("BiomassTRANS").summary()
+```
+
+```{python}
+model.reactions.get_by_id("BiomassEX").summary()
+```
+
+```{python}
+[reaction.id for reaction in list(model.reactions) if "light" in reaction.id.lower()]
+```
+
+```{python}
+model.reactions[29]
+```
+
+
+
+```{python}
+list(model.metabolites)
+```
+
+
+```{python}
+list(model.compa)
+```
+
+```{python}
+model.compartments
+```
+
+
+```{python}
+model.reactions.R03658.bounds
+```
+
+
+
+```{python}
+R03658 = model.reactions.get_by_id("R03658")
+R03658
+```
+
+
+```{python}
+print(R03658.name)
+print(R03658.reaction)
+```
+
+```{python}
+print(R03658.lower_bound, "< R03658 <", R03658.upper_bound)
+print(R03658.reversibility)
+```
+
+
+```{python}
+old_bounds = R03658.bounds
+R03658.bounds = (-1000.0, 1000.0)
+print(R03658.lower_bound, "< R03658 <", R03658.upper_bound)
+print("Reversibility after modification:", R03658.reversibility)
+R03658.bounds = old_bounds
+print("Reversibility after resetting:", R03658.reversibility)
+```
+```{python}
+old_bounds = R03658.bounds
+print('Upper bound prior to setting new lower bound:', R03658.upper_bound)
+R03658.lower_bound = 1100
+print('Upper bound after setting new lower bound:', R03658.upper_bound)
+R03658.bounds = old_bounds
+```
+
+```{python}
+R03658.check_mass_balance()
+```
+
+```{python}
+R03658.add_metabolites({model.metabolites.get_by_id("H[c]"): -1})
+R03658.reaction
+```
+
+```{python}
+R03658.check_mass_balance()
+```
+
+```{python}
+R03658.subtract_metabolites({model.metabolites.get_by_id("H[c]"): -1})
+print(R03658.reaction)
+print(R03658.check_mass_balance())
+```
+
+```{python}
+model.metabolites.get_by_id("L_Glutamine[c]")
+```
+
+```{python}
+model.solver
+```
+
+
+```{python}
+model.objective.expression
+```
+
+```{python}
+print("exchanges", model.exchanges)
+print("demands", model.demands)
+print("sinks", model.sinks)
+print("boundary", model.boundary)
+```
+
+```{python}
+solution = model.optimize()
+print(solution)
+print(solution.objective_value)
+
+```
+
+```{python}
+%%time
+model.optimize().objective_value
+```
+
+```{python}
+%%time
+model.slim_optimize()
+```
+
+```{python}
+model.optimize()
+# model.summary(fva=0.95)
+model.summary()
+
+```
+
+```{python}
+model.metabolites.get_by_id("Hydrogen_peroxide[c]").summary()
+
+```
+
+```{python}
+model.metabolites.get_by_id("CO2[c]").summary()
+```
+
+```{python}
+model.metabolites.get_by_id("ATP[c]").summary()
+```
+
+```{python}
+fba_solution = model.optimize()
+pfba_solution = cobra.flux_analysis.pfba(model)
+
+print(fba_solution.fluxes["BIOMASS"] - pfba_solution.fluxes["BIOMASS"])
+print(np.isclose(fba_solution.fluxes["BIOMASS"], pfba_solution.fluxes["BIOMASS"]))
+```
+
+```{python}
+geometric_fba_sol = cobra.flux_analysis.geometric_fba(model)
+geometric_fba_sol
+```
+
+```{python}
+print('complete model: ', model.optimize().objective_value)
+with model as med4:
+    med4.reactions.get_by_id("R03658").knock_out()
+    print("R03658 knocked out:", med4.optimize().objective_value)
+
+```
+
+```{python}
+model.name
+```
