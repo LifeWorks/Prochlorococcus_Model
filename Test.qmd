@@ -1,8 +1,8 @@
 ---
-title: "Untitled"
+title: Untitled
 format: html
+jupyter: python3
 ---
-
 
 ```{python}
 import pandas as pd
@@ -62,12 +62,9 @@ model.reactions.get_by_id("BiomassEX").summary()
 model.reactions[29]
 ```
 
-
-
 ```{python}
 list(model.metabolites)
 ```
-
 
 ```{python}
 list(model.compa)
@@ -77,18 +74,14 @@ list(model.compa)
 model.compartments
 ```
 
-
 ```{python}
 model.reactions.R03658.bounds
 ```
-
-
 
 ```{python}
 R03658 = model.reactions.get_by_id("R03658")
 R03658
 ```
-
 
 ```{python}
 print(R03658.name)
@@ -100,7 +93,6 @@ print(R03658.lower_bound, "< R03658 <", R03658.upper_bound)
 print(R03658.reversibility)
 ```
 
-
 ```{python}
 old_bounds = R03658.bounds
 R03658.bounds = (-1000.0, 1000.0)
@@ -109,6 +101,7 @@ print("Reversibility after modification:", R03658.reversibility)
 R03658.bounds = old_bounds
 print("Reversibility after resetting:", R03658.reversibility)
 ```
+
 ```{python}
 old_bounds = R03658.bounds
 print('Upper bound prior to setting new lower bound:', R03658.upper_bound)
@@ -144,7 +137,6 @@ model.metabolites.get_by_id("L_Glutamine[c]")
 model.solver
 ```
 
-
 ```{python}
 model.objective.expression
 ```
@@ -160,7 +152,6 @@ print("boundary", model.boundary)
 solution = model.optimize()
 print(solution)
 print(solution.objective_value)
-
 ```
 
 ```{python}
@@ -177,12 +168,10 @@ model.slim_optimize()
 model.optimize()
 # model.summary(fva=0.95)
 model.summary()
-
 ```
 
 ```{python}
 model.metabolites.get_by_id("Hydrogen_peroxide[c]").summary()
-
 ```
 
 ```{python}
@@ -211,9 +200,264 @@ print('complete model: ', model.optimize().objective_value)
 with model as med4:
     med4.reactions.get_by_id("R03658").knock_out()
     print("R03658 knocked out:", med4.optimize().objective_value)
-
 ```
 
 ```{python}
 model.name
 ```
+
+```{python}
+import os
+import cobra
+import cobra.io
+import cometspy as c
+
+# Load a textbook example model using the COBRAPy toolbox 
+test_model = cobra.io.load_model('textbook')
+
+# Use the above model to create a COMETS model
+test_model = c.model(test_model)
+
+# Change comets specific parameters, e.g. the initial biomass of the model
+# Notre 
+test_model.initial_pop = [0, 0, 1e-7] 
+```
+
+```{python}
+# Create a parameters object with default values 
+my_params = c.params()
+
+# Change the value of a parameter, for example number of simulation cycles
+my_params.set_param('maxCycles', 100)
+
+# Set some writeTotalBiomassLog parameter to True, in order to save the output
+my_params.set_param('writeTotalBiomassLog', True)
+
+# See avaliable parameters and their values
+my_params.show_params()
+```
+
+```{python}
+my_layout = c.layout(test_model)
+```
+
+```{python}
+my_layout.media
+```
+
+```{python}
+# os.environ['COMETS_HOME'] = '/Applications/COMETS'
+# COMETS_HOME = os.environ['COMETS_HOME']
+# os.environ['PATH'] = f'{os.environ["PATH"]}/Applications/COMETS'
+# PATH = os.environ['PATH']
+# os.environ['GUROBI_HOME'] = '/Library/gurobi1100/macos_universal2'
+# GUROBI_HOME = os.environ['GUROBI_HOME']
+# os.environ['GUROBI_COMETS_HOME'] = '/Library/gurobi1100/macos_universal2'
+# GUROBI_COMETS_HOME = os.environ['GUROBI_COMETS_HOME']
+# os.environ['LD_LIBRARY_PATH'] = f'{os.environ["LD_LIBRARY_PATH"]}:/Library/gurobi1100/macos_universal2/lib'
+# LD_LIBRARY_PATH = os.environ['LD_LIBRARY_PATH']
+
+my_simulation = c.comets(my_layout, my_params)
+# my_simulation.JAVA_CLASSPATH = f'{COMETS_HOME}/lib/JMatIO/lib/jmatio.jar:{COMETS_HOME}/lib/jdistlib-0.4.5-bin.jar:{COMETS_HOME}/lib/commons-math3-3.6.1/commons-math3-3.6.1.jar:{COMETS_HOME}/lib/commons-lang3-3.9/commons-lang3-3.9.jar:{COMETS_HOME}/lib/colt/lib/colt.jar:{COMETS_HOME}/lib/concurrent-1.3.4.jar:{COMETS_HOME}/bin/comets_2.10.5.jar:{GUROBI_COMETS_HOME}/lib/gurob\i.jar'
+my_simulation.run()
+```
+
+```{python}
+os.environ["GUROBI_COMETS_HOME"]
+```
+
+
+## Import the models and medium conditions, define light and light absorption parameters and initialize the COMETS layout
+
+The first step is to load the Prochlorococcus model iSO595.
+
+```{python}
+old_model_file = './Model_files/archive/iSO595v6.xml'
+ori_model_file = './Model_files/iSO595v7.xml'
+v1_model_file = './Model_files/ProchlorococcusMED4v1.xml' 
+model = read_sbml_model(ori_model_file)
+model.name = 'Prochlorococcus MED4'
+# print(len(model.reactions))
+# print(len(model.metabolites))
+# print(len(model.genes))
+model.id = 'ProchlorococcusMED4'
+# write_sbml_model(model, v1_model_file)
+model
+```
+
+```{python}
+model.summary()
+```
+
+```{python}
+model.solver
+```
+
+```{python}
+# model.solver = 'cplex'
+# model.solver
+```
+
+## Modelling the diurnal cycle
+
+COMETS can simulate periodically changing environments, where the periodic function can be either a step function, a sine function or a half sine function. The most obvious use case for this functionality is to study how the metabolism of photosynthetic organisms change during the day / night cycle with varying sunlight (photons) and how this affects the microbes. Here we simulate one such experiment with a genome-scale model of Prochlorococcus, the most abundant marine photoautotroph.
+
+
+```{python}
+import cometspy as c
+# Use the above model to create a COMETS model
+model = c.model(ori_model_file)
+# Change comets specific parameters, e.g. the initial biomass of the model
+# Notre 
+model.initial_pop = [1, 1, 1e-7] 
+# Create a parameters object with default values 
+my_params = c.params()
+# Change the value of a parameter, for example number of simulation cycles
+my_params.set_param('maxCycles', 480)
+# Set some writeTotalBiomassLog parameter to True, in order to save the output
+my_params.set_param('writeTotalBiomassLog', True)
+# my_params.set_param('defaultDiffConst', 0)
+# See avaliable parameters and their values
+print(my_params.show_params().to_string())
+```
+
+
+We now define the parameters related to light absorption and use these to calculate a model-specific absorption coefficient. We assume a monochromatic light source at 680 nm, but it is possible to extend these calculations to a light source with a spectral distribution. All parameters are acquired from the literature(refs 52, 53, 54, 55, 56, 57).
+
+```{python}
+model = c.model(ori_model_file)
+model.initial_pop = [1, 1, 1e-7]
+model.obj_style = 'MAX_OBJECTIVE_MIN_TOTAL'
+```
+
+```{python}
+# The ratio of chlorophyll is extracted from the model biomass-function
+ci_dvchla = 0.0163                 # gr/gDW (Partensky 1993 / Casey 2016)
+ci_dvchlb = 0.0013                # gr/gDW (Partensky 1993 / Casey 2016)
+absorption_dvchla_680 = 0.0184    # m^2 mg^-1 (Bricaud et al., 2004)
+absorption_dvchlb_680 = 0.0018    # m^2 mg^-1 (Bricaud et al., 2004)
+absorption_water_680 = 0.465      # m^-1 (Pope and Fry, 1997)
+wavelength = 680                  # nm
+```
+
+Calculate the packaging effect. This is taking into account that the light-absorbing pigments are not dissolved in the media, but contained within discrete cells 58. The packaging effect approaches 0 asymptotically for large cells. Depending on the accuracy needed in the calculation the packaging effect can be assumed to be close to 1 for very small cells, such as Prochlorococcus 58.
+
+```{python}
+diameter = 0.6                    # um (Morel et al., 1993)
+n_dash = 13.77*1e-3               # imaginary part of refractive index at 675 nm (Stramski et al. 2001)
+size_parameter_alpha = diameter*1e3*math.pi/wavelength    # The ratio between the cell size and wavelength
+rho_dash = 4*size_parameter_alpha*n_dash
+Q_a = 1+(2*math.exp(-rho_dash)/rho_dash)+2*(math.exp(-rho_dash)-1)/rho_dash**2
+packaging_effect = 1.5*Q_a/rho_dash
+
+# Calculate the Prochlorococcus specific biomass absorption coefficient in units m2/ g DW biomass
+absorption_biomass = packaging_effect*(ci_dvchla*1e3*absorption_dvchla_680+ci_dvchlb*1e3*absorption_dvchlb_680)
+print(absorption_water_680)
+print(absorption_biomass)
+```
+
+Set the calculated absorption rate as a model parameter for the exchange reaction of light. LightEX is the exchange reaction for photons in the model.
+
+```{python}
+# model.add_light('LightEX', absorption_biomass, absorption_water_680)
+# model.add_light('LightEX', 10 * absorption_biomass, 10 * absorption_water_680)
+model.add_light('LightEX', 1, 101)
+```
+
+Now create the layout and define concentration of metabolites in the growth medium. We here set the concentration of all essential metabolites except photons to 1000 mmol and activate the `static` flag, because we want the growth to be only limited by the light conditions
+
+```{python}
+# Make layout with the COMETS toolbox
+layout = c.layout(model);
+
+
+# Define medium
+metabs = ['Ammonia[e]', 'HCO3[e]', 'CO2[e]', 'H[e]', 'Orthophosphate[e]', 'H2O[e]', 'Cadmium[e]', 
+          'Calcium_cation[e]', 'Chloride_ion[e]', 'Cobalt_ion[e]', 'Copper[e]', 'Fe2[e]', 
+          'Magnesium_cation[e]', 'Molybdenum[e]', 'K[e]','Selenate[e]', 'Sodium_cation[e]', 
+          'Strontium_cation[e]', 'Sulfate[e]', 'Zn2[e]', 'Hydrogen_sulfide[e]']
+
+for i in metabs:
+    layout.set_specific_metabolite(i, 1000)
+    layout.set_specific_static(i, 1000)
+```
+
+```{python}
+layout.grid = [1000, 1000, 1000]
+```
+
+### Define light conditions. 
+Light is modelled as individual photons the value is the number of photons (in mmol) absorbed by the organism at each timepoint. While it is treated like any other metabolite, it is more reasonable to consider it light intensity than a concentration which the other compounds in the media are. To model natural light conditions we use the periodic function called half sin which is equal to $max(f(t), 0) $ where:
+
+$$
+f(t) = A\sin(\omega t+\phi)+C
+$$
+
+Here A is the amplitude, $\omega$ is the angular frequency ($\omega=2\pi/T$), T the period, $\phi$ the phase and C the offset. Other periodic functions are available: step function, sine and cosine. In this example we define global light conditions. We here define the period to 24 hours with an amplitude of 0.04 mmol photons per meter squared per second.
+
+```{python}
+# Set light conditions by defining parameters
+layout.set_global_periodic_media(metabolite='Photon[e]', function='half_sin', amplitude=0.04,
+                                 period=24, phase=0, offset=0)
+```
+
+```{python}
+print(layout.media.to_string())
+```
+
+### Set simulation parameters
+
+Now set relevant simulation parameters
+
+```{python}
+# Set simulation parameters
+sim_params = c.params()
+
+sim_params.all_params['maxCycles'] = 480
+sim_params.all_params['timeStep'] = 0.1
+sim_params.all_params['defaultDiffConst'] = 0
+```
+
+### Run `COMETS` simulation
+
+```{python}
+# os.environ['COMETS_HOME'] = '/Applications/COMETS'
+# COMETS_HOME = os.environ['COMETS_HOME']
+# os.environ['PATH'] = f'{os.environ["PATH"]}/Applications/COMETS'
+# PATH = os.environ['PATH']
+# os.environ['GUROBI_HOME'] = '/Library/gurobi1100/macos_universal2'
+# GUROBI_HOME = os.environ['GUROBI_HOME']
+# os.environ['GUROBI_COMETS_HOME'] = '/Library/gurobi1100/macos_universal2'
+# GUROBI_COMETS_HOME = os.environ['GUROBI_COMETS_HOME']
+# os.environ['LD_LIBRARY_PATH'] = f'{os.environ["LD_LIBRARY_PATH"]}:/Library/gurobi1100/macos_universal2/lib'
+# LD_LIBRARY_PATH = os.environ['LD_LIBRARY_PATH']
+# os.environ['JVM_ARGS']="-Xms10G -Xmx10G"
+# os.environ['JAVA_OPTS']="-Xms10G -Xmx10G"
+# os.environ['JAVA_TOOLS_OPTIONS']="-Xms10G -Xmx10G"
+# Runs comets and produce the output files mediaLog.m and biomassLog.m
+simulation = c.comets(layout, sim_params)
+simulation.run(delete_files=False)
+```
+
+```{python}
+print(simulation.run_output)
+# print(simulation.GUROBI_HOME)
+# print(simulation.classpath_pieces['gurobi'])
+# print(simulation.classpath_pieces['hamcrest'])
+# print(simulation.classpath_pieces['jogl_all'])
+# print(simulation.classpath_pieces['gluegen_rt'])
+# print(simulation.classpath_pieces['gluegen'])
+# print(simulation.classpath_pieces['gluegen_rt_natives'])
+# print(simulation.classpath_pieces['jogl_all_natives'])
+# print(simulation.classpath_pieces['jmatio'])
+# print(simulation.classpath_pieces['jmat'])
+# print(simulation.classpath_pieces['concurrent'])
+# print(simulation.classpath_pieces['colt'])
+# print(simulation.classpath_pieces['lang3'])
+# print(simulation.classpath_pieces['math3'])
+# print(simulation.classpath_pieces['jdistlib'])
+# print(simulation.classpath_pieces['bin'])
+# print(simulation.JAVA_CLASSPATH)
+# simulation.__test_classpath_pieces()
+```
+
